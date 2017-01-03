@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"path"
 
 	"net/http"
 
@@ -146,6 +147,7 @@ func initRedis() {
 
 // Remove all other unrecognised characters apart from
 var makeSafeFileName = regexp.MustCompile(`[#<>:"/\|?*\\]`)
+var fileNamesList map[string]int
 
 func getFilesFromRedis(ref string) (files []*redisFile, err error) {
 
@@ -218,6 +220,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Disposition", "attachment; filename=\""+downloadas[0]+"\"")
 	w.Header().Add("Content-Type", "application/zip")
 
+	// initializing list of filenames already used
+	fileNamesList = make(map[string]int)
+
 	// Loop over files, add them to the
 	zipWriter := zip.NewWriter(w)
 	for _, file := range files {
@@ -226,6 +231,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		safeFileName := makeSafeFileName.ReplaceAllString(file.FileName, "")
 		if safeFileName == "" { // Unlikely but just in case
 			safeFileName = "file"
+		}
+
+		// Building another name if file already exists on zip
+		base := path.Base(safeFileName)
+		if fileNamesList[base] != 0 {
+			extension := path.Ext(safeFileName)
+			filename := base[:len(base)-len(extension)]
+
+			safeFileName = filename + " (" + strconv.Itoa(fileNamesList[base]) + ")" + extension
+			fileNamesList[base] = fileNamesList[base] + 1
+		} else {
+			fileNamesList[base] = 1
 		}
 
 		// Read file from S3, log any errors
