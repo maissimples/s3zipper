@@ -147,7 +147,6 @@ func initRedis() {
 
 // Remove all other unrecognised characters apart from
 var makeSafeFileName = regexp.MustCompile(`[#<>:"/\|?*\\]`)
-var fileNamesList map[string]int
 
 func getFilesFromRedis(ref string) (files []*redisFile, err error) {
 
@@ -221,7 +220,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "application/zip")
 
 	// initializing list of filenames already used
-	fileNamesList = make(map[string]int)
+	fileNamesList := make(map[string]int)
 
 	// Loop over files, add them to the
 	zipWriter := zip.NewWriter(w)
