@@ -16,9 +16,9 @@ import (
 
 	"net/http"
 
-	"github.com/maissimples/s3zipper/Godeps/_workspace/src/github.com/AdRoll/goamz/aws"
-	"github.com/maissimples/s3zipper/Godeps/_workspace/src/github.com/AdRoll/goamz/s3"
-	redigo "github.com/maissimples/s3zipper/Godeps/_workspace/src/github.com/garyburd/redigo/redis"
+	"github.com/AdRoll/goamz/aws"
+	"github.com/AdRoll/goamz/s3"
+	redigo "github.com/garyburd/redigo/redis"
 
 	newrelic "github.com/newrelic/go-agent"
 )

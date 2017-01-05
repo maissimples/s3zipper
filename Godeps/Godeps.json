@@ -2,22 +2,57 @@
 	"ImportPath": "github.com/maissimples/s3zipper",
 	"GoVersion": "go1.7",
 	"GodepVersion": "v75",
+	"Packages": [
+		"./..."
+	],
 	"Deps": [
 		{
 			"ImportPath": "github.com/AdRoll/goamz/aws",
-			"Rev": "e57621c0fb3df6366f8a82e7d8a5a6ce24bf8c4b"
+			"Rev": "75f08be23845d6d5896a422be85b6aa45d2e6c5f"
 		},
 		{
 			"ImportPath": "github.com/AdRoll/goamz/s3",
-			"Rev": "e57621c0fb3df6366f8a82e7d8a5a6ce24bf8c4b"
+			"Rev": "75f08be23845d6d5896a422be85b6aa45d2e6c5f"
 		},
 		{
 			"ImportPath": "github.com/garyburd/redigo/internal",
-			"Rev": "836b6e58b3358112c8291565d01c35b8764070d7"
+			"Comment": "v1.0.0-16-g8c052d8",
+			"Rev": "8c052d82153967815d9093a7e9d3e7fd2e554861"
 		},
 		{
 			"ImportPath": "github.com/garyburd/redigo/redis",
-			"Rev": "836b6e58b3358112c8291565d01c35b8764070d7"
+			"Comment": "v1.0.0-16-g8c052d8",
+			"Rev": "8c052d82153967815d9093a7e9d3e7fd2e554861"
+		},
+		{
+			"ImportPath": "github.com/newrelic/go-agent",
+			"Comment": "v1.5.0",
+			"Rev": "7d12ae2201fc160e486197614a6f65afcf3f8170"
+		},
+		{
+			"ImportPath": "github.com/newrelic/go-agent/internal",
+			"Comment": "v1.5.0",
+			"Rev": "7d12ae2201fc160e486197614a6f65afcf3f8170"
+		},
+		{
+			"ImportPath": "github.com/newrelic/go-agent/internal/jsonx",
+			"Comment": "v1.5.0",
+			"Rev": "7d12ae2201fc160e486197614a6f65afcf3f8170"
+		},
+		{
+			"ImportPath": "github.com/newrelic/go-agent/internal/logger",
+			"Comment": "v1.5.0",
+			"Rev": "7d12ae2201fc160e486197614a6f65afcf3f8170"
+		},
+		{
+			"ImportPath": "github.com/newrelic/go-agent/internal/sysinfo",
+			"Comment": "v1.5.0",
+			"Rev": "7d12ae2201fc160e486197614a6f65afcf3f8170"
+		},
+		{
+			"ImportPath": "github.com/newrelic/go-agent/internal/utilization",
+			"Comment": "v1.5.0",
+			"Rev": "7d12ae2201fc160e486197614a6f65afcf3f8170"
 		}
 	]
 }
