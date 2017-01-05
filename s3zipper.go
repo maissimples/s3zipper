@@ -19,6 +19,8 @@ import (
 	"github.com/maissimples/s3zipper/Godeps/_workspace/src/github.com/AdRoll/goamz/aws"
 	"github.com/maissimples/s3zipper/Godeps/_workspace/src/github.com/AdRoll/goamz/s3"
 	redigo "github.com/maissimples/s3zipper/Godeps/_workspace/src/github.com/garyburd/redigo/redis"
+
+	newrelic "github.com/newrelic/go-agent"
 )
 
 type configuration struct {
@@ -31,9 +33,18 @@ type configuration struct {
 	Port               string
 }
 
-var config configuration
-var awsBucket *s3.Bucket
-var redisPool *redigo.Pool
+type newRelicConfiguration struct {
+	AppName            string
+	SecretKey          string
+}
+
+var (
+	config configuration
+	newRelicConfig newRelicConfiguration
+	awsBucket *s3.Bucket
+	redisPool *redigo.Pool
+	newRelicApp newrelic.Application
+)
 
 type redisFile struct {
 	FileName string
@@ -54,11 +65,12 @@ func main() {
 	}
 
 	initConfig()
+	initNewRelicAgent()
 	initAwsBucket()
 	initRedis()
 
 	fmt.Println("Running on port", config.Port)
-	http.HandleFunc("/", handler)
+	http.HandleFunc(newrelic.WrapHandleFunc(newRelicApp, "/", handler))
 	http.ListenAndServe(":"+config.Port, nil)
 }
 
@@ -77,14 +89,14 @@ func test() {
 	parseFileDates(files)
 }
 
-func initConfig() {
-	defaults := func(value, def string) string {
-		if value == "" {
-			return def
-		}
-		return value
+func defaults(value, def string) string {
+	if value == "" {
+		return def
 	}
+	return value
+}
 
+func initConfig() {
 	config = configuration{
 		AccessKey:          os.Getenv("AWS_ACCESS_KEY"),
 		SecretKey:          os.Getenv("AWS_SECRET_KEY"),
@@ -93,6 +105,22 @@ func initConfig() {
 		RedisServerAndPort: os.Getenv("REDIS_URL"),
 		RedisAuth:          os.Getenv("REDIS_AUTH"),
 		Port:               defaults(os.Getenv("PORT"), "8000"),
+	}
+}
+
+func initNewRelicAgent() {
+	newRelicConfig = newRelicConfiguration{
+		AppName:						defaults(os.Getenv("NEW_RELIC_APP_NAME"), "s3zipper-stg"),
+		SecretKey:					defaults(os.Getenv("NEW_RELIC_LICENSE_KEY"), "60b00e37eb643d5a2156a668dbe2de37f93dc626"),
+	}
+
+	config := newrelic.NewConfig(newRelicConfig.AppName, newRelicConfig.SecretKey)
+	config.Logger = newrelic.NewDebugLogger(os.Stdout)
+
+	var err error
+	newRelicApp, err = newrelic.NewApplication(config)
+	if nil != err {
+		panic(err)
 	}
 }
 
