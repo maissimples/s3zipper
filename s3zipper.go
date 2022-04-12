@@ -65,12 +65,18 @@ func main() {
 	}
 
 	initConfig()
-	initNewRelicAgent()
+	// initNewRelicAgent()
 	initAwsBucket()
 	initRedis()
 
 	fmt.Println("Running on port", config.Port)
-	http.HandleFunc(newrelic.WrapHandleFunc(newRelicApp, "/", handler))
+	// http.HandleFunc(newrelic.WrapHandleFunc(newRelicApp, "/", handler))
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { 
+		w.WriteHeader(http.StatusOK) 
+		return
+	})
+	http.HandleFunc("/s3zipper", handler)
+
 	http.ListenAndServe(":"+config.Port, nil)
 }
 
