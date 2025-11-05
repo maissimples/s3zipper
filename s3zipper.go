@@ -16,41 +16,44 @@ import (
 
   "net/http"
 
-  "github.com/AdRoll/goamz/aws"
-  "github.com/AdRoll/goamz/s3"
   redigo "github.com/garyburd/redigo/redis"
-
   newrelic "github.com/newrelic/go-agent"
+
+  "github.com/aws/aws-sdk-go/aws"
+  "github.com/aws/aws-sdk-go/aws/credentials"
+  "github.com/aws/aws-sdk-go/aws/session"
+  "github.com/aws/aws-sdk-go/service/s3"
 )
 
 type configuration struct {
   AccessKey          string
   SecretKey          string
   Bucket             string
-  Region             string
   RedisServerAndPort string
   RedisAuth          string
   Port               string
+  S3Endpoint         string
+  S3Region           string
+  S3ForcePathStyle   bool
 }
 
 type newRelicConfiguration struct {
-  AppName            string
-  SecretKey          string
+  AppName   string
+  SecretKey string
 }
 
 var (
-  config configuration
+  config         configuration
   newRelicConfig newRelicConfiguration
-  awsBucket *s3.Bucket
-  redisPool *redigo.Pool
-  newRelicApp newrelic.Application
+  s3Client       *s3.S3
+  redisPool      *redigo.Pool
+  newRelicApp    newrelic.Application
 )
 
 type redisFile struct {
-  FileName string
-  Folder   string
-  S3Path   string
-  // Optional - we use are Teamwork.com but feel free to rmove
+  FileName     string
+  Folder       string
+  S3Path       string
   FileID       int64 `json:",string"`
   ProjectID    int64 `json:",string"`
   ProjectName  string
@@ -65,25 +68,28 @@ func main() {
   }
 
   initConfig()
-  // initNewRelicAgent()
   initAwsBucket()
   initRedis()
 
   fmt.Println("Running on port", config.Port)
-  // http.HandleFunc(newrelic.WrapHandleFunc(newRelicApp, "/", handler))
   http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+    log.Printf("Request to root path: %s. Sending instructions.", r.RequestURI)
+    w.Header().Set("Content-Type", "text/plain; charset=utf-8")
     w.WriteHeader(http.StatusOK)
-    return
+    io.WriteString(w, "This is the s3zipper service. Use the /s3zipper endpoint with the 'ref' query parameter to create a zip file.")
   })
   http.HandleFunc("/s3zipper", handler)
 
-  http.ListenAndServe(":"+config.Port, nil)
+  err := http.ListenAndServe(":"+config.Port, nil)
+  if err != nil {
+    log.Fatalf("Failed to start server: %v", err)
+  }
 }
 
 func test() {
   var err error
   var files []*redisFile
-  jsonData := "[{\"S3Path\":\"1\\/p23216.tf_A89A5199-F04D-A2DE-5824E635AC398956.Avis_Rent_A_Car_Print_Reservation.pdf\",\"FileVersionId\":\"4164\",\"FileName\":\"Avis Rent A Car_ Print Reservation.pdf\",\"ProjectName\":\"Superman\",\"ProjectID\":\"23216\",\"Folder\":\"\",\"FileID\":\"4169\"},{\"modified\":\"2015-07-18T02:05:04Z\",\"S3Path\":\"1\\/p23216.tf_351310E0-DF49-701F-60601109C2792187.a1.jpg\",\"FileVersionId\":\"4165\",\"FileName\":\"a1.jpg\",\"ProjectName\":\"Superman\",\"ProjectID\":\"23216\",\"Folder\":\"Level 1\\/Level 2 x\\/Level 3\",\"FileID\":\"4170\"}]"
+  jsonData := `[{"S3Path":"1/p23216.tf_A89A5199-F04D-A2DE-5824E635AC398956.Avis_Rent_A_Car_Print_Reservation.pdf","FileVersionId":"4164","FileName":"Avis Rent A Car_ Print Reservation.pdf","ProjectName":"Superman","ProjectID":"23216","Folder":"","FileID":"4169"},{"modified":"2015-07-18T02:05:04Z","S3Path":"1/p23216.tf_351310E0-DF49-701F-60601109C2792187.a1.jpg","FileVersionId":"4165","FileName":"a1.jpg","ProjectName":"Superman","ProjectID":"23216","Folder":"Level 1/Level 2 x/Level 3","FileID":"4170"}]`
 
   resultByte := []byte(jsonData)
 
@@ -103,21 +109,37 @@ func defaults(value, def string) string {
 }
 
 func initConfig() {
+  forcePathStyle, _ := strconv.ParseBool(defaults(os.Getenv("S3_FORCE_PATH_STYLE"), "false"))
   config = configuration{
     AccessKey:          os.Getenv("AWS_ACCESS_KEY"),
     SecretKey:          os.Getenv("AWS_SECRET_KEY"),
     Bucket:             os.Getenv("AWS_BUCKET"),
-    Region:             defaults(os.Getenv("AWS_REGION"), "us-east-1"),
     RedisServerAndPort: os.Getenv("REDIS_URL"),
     RedisAuth:          os.Getenv("REDIS_AUTH"),
     Port:               defaults(os.Getenv("PORT"), "8000"),
+    S3Endpoint:         os.Getenv("S3_ENDPOINT"),
+    S3Region:           defaults(os.Getenv("S3_REGION"), "us-east-1"),
+    S3ForcePathStyle:   forcePathStyle,
+  }
+
+  if config.AccessKey == "" {
+    log.Fatal("Missing required environment variable: AWS_ACCESS_KEY")
+  }
+  if config.SecretKey == "" {
+    log.Fatal("Missing required environment variable: AWS_SECRET_KEY")
+  }
+  if config.Bucket == "" {
+    log.Fatal("Missing required environment variable: AWS_BUCKET")
+  }
+  if config.RedisServerAndPort == "" {
+    log.Fatal("Missing required environment variable: REDIS_URL")
   }
 }
 
 func initNewRelicAgent() {
   newRelicConfig = newRelicConfiguration{
-    AppName:            defaults(os.Getenv("NEW_RELIC_APP_NAME"), "s3zipper-stg"),
-    SecretKey:          defaults(os.Getenv("NEW_RELIC_LICENSE_KEY"), "60b00e37eb643d5a2156a668dbe2de37f93dc626"),
+    AppName:   defaults(os.Getenv("NEW_RELIC_APP_NAME"), "s3zipper-stg"),
+    SecretKey: defaults(os.Getenv("NEW_RELIC_LICENSE_KEY"), "60b00e37eb643d5a2156a668dbe2de37f93dc626"),
   }
 
   config := newrelic.NewConfig(newRelicConfig.AppName, newRelicConfig.SecretKey)
@@ -143,13 +165,16 @@ func parseFileDates(files []*redisFile) {
 }
 
 func initAwsBucket() {
-  expiration := time.Now().Add(time.Hour * 1)
-  auth, err := aws.GetAuth(config.AccessKey, config.SecretKey, "", expiration) //"" = token which isn't needed
+  sess, err := session.NewSession(&aws.Config{
+    Endpoint:         &config.S3Endpoint,
+    Region:           &config.S3Region,
+    Credentials:      credentials.NewStaticCredentials(config.AccessKey, config.SecretKey, ""),
+    S3ForcePathStyle: &config.S3ForcePathStyle,
+  })
   if err != nil {
     panic(err)
   }
-
-  awsBucket = s3.New(auth, aws.GetRegion(config.Region)).Bucket(config.Bucket)
+  s3Client = s3.New(sess)
 }
 
 func initRedis() {
@@ -179,28 +204,23 @@ func initRedis() {
   }
 }
 
-// Remove all other unrecognised characters apart from
 var makeSafeFileName = regexp.MustCompile(`[#<>:"/\|?*\\]`)
 
 func getFilesFromRedis(ref string) (files []*redisFile, err error) {
-
-  // Testing - enable to test. Remove later.
   if 1 == 0 && ref == "test" {
-    files = append(files, &redisFile{FileName: "test.zip", Folder: "", S3Path: "test/test.zip"}) // Edit and dplicate line to test
+    files = append(files, &redisFile{FileName: "test.zip", Folder: "", S3Path: "test/test.zip"})
     return
   }
 
   redis := redisPool.Get()
   defer redis.Close()
 
-  // Get the value from Redis
   result, err := redis.Do("GET", "zip:"+ref)
   if err != nil || result == nil {
     err = errors.New("Access Denied (sorry your link has timed out)")
     return
   }
 
-  // Convert to bytes
   var resultByte []byte
   var ok bool
   if resultByte, ok = result.([]byte); !ok {
@@ -208,13 +228,11 @@ func getFilesFromRedis(ref string) (files []*redisFile, err error) {
     return
   }
 
-  // Decode JSON
   err = json.Unmarshal(resultByte, &files)
   if err != nil {
     err = errors.New("Error decoding json: " + string(resultByte))
   }
 
-  // Convert mofified date strings to time objects
   parseFileDates(files)
 
   return
@@ -223,7 +241,6 @@ func getFilesFromRedis(ref string) (files []*redisFile, err error) {
 func handler(w http.ResponseWriter, r *http.Request) {
   start := time.Now()
 
-  // Get "ref" URL params
   refs, ok := r.URL.Query()["ref"]
   if !ok || len(refs) < 1 {
     http.Error(w, "S3 File Zipper. Pass ?ref= to use.", 500)
@@ -231,7 +248,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
   }
   ref := refs[0]
 
-  // Get "downloadas" URL params
   downloadas, ok := r.URL.Query()["downloadas"]
   if !ok && len(downloadas) > 0 {
     downloadas[0] = makeSafeFileName.ReplaceAllString(downloadas[0], "")
@@ -249,24 +265,29 @@ func handler(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  // Start processing the response
+  log.Printf("Found %%d files in Redis for ref '%s'", len(files), ref)
+  if len(files) == 0 {
+    msg := "No files found for the given reference."
+    http.Error(w, msg, http.StatusNotFound)
+    log.Printf("No files found for ref '%s'. Responded with 404.", ref)
+    return
+  }
+
   w.Header().Add("Content-Disposition", "attachment; filename=\""+downloadas[0]+"\"")
   w.Header().Add("Content-Type", "application/zip")
 
-  // initializing list of filenames already used
   fileNamesList := make(map[string]int)
 
-  // Loop over files, add them to the
   zipWriter := zip.NewWriter(w)
   for _, file := range files {
 
-    // Build safe file file name
+    log.Printf("Processing file: S3Path='%s', OutputFileName='%s'", file.S3Path, file.FileName)
+
     safeFileName := makeSafeFileName.ReplaceAllString(file.FileName, "")
-    if safeFileName == "" { // Unlikely but just in case
+    if safeFileName == "" {
       safeFileName = "file"
     }
 
-    // Building another name if file already exists on zip
     base := path.Base(safeFileName)
     if fileNamesList[base] != 0 {
       extension := path.Ext(safeFileName)
@@ -278,24 +299,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
       fileNamesList[base] = 1
     }
 
-    // Read file from S3, log any errors
-    rdr, err := awsBucket.GetReader(file.S3Path)
+    input := &s3.GetObjectInput{
+      Bucket: aws.String(config.Bucket),
+      Key:    aws.String(file.S3Path),
+    }
+    result, err := s3Client.GetObject(input)
     if err != nil {
-      switch t := err.(type) {
-      case *s3.Error:
-        if t.StatusCode == 404 {
-          log.Printf("File not found. %s", file.S3Path)
-        }
-      default:
-        log.Printf("Error downloading \"%s\" - %s", file.S3Path, err.Error())
-      }
+      log.Printf("Error downloading \"%s\" - %s", file.S3Path, err.Error())
       continue
     }
-
-    if rdr == nil {
-      log.Printf("Reader is nil for file %s", file.S3Path)
-      continue
-    }
+    defer result.Body.Close()
 
     // Build a good path for the file within the zip
     zipPath := ""
@@ -336,13 +349,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
       continue
     }
 
-    if _, err = io.Copy(f, rdr); err != nil {
+    if _, err = io.Copy(f, result.Body); err != nil {
       log.Printf("Error writing file %s to zip: %s", file.FileName, err.Error())
-      rdr.Close()
       continue
     }
-
-    rdr.Close()
   }
 
   zipWriter.Close()
